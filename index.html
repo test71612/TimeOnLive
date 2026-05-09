@@ -1,231 +1,174 @@
-<!DOCTYPE html>
-<html lang="ar" dir="rtl">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet">
-<style>
-*{box-sizing:border-box;margin:0;padding:0}
+"use client"
 
-html, body {
-  width: 100%;
-  height: 100%;
-  background: transparent; 
-  overflow: hidden;
+import { useState, useEffect, useRef, useCallback } from "react"
+
+const TOTAL = 300 // 5 دقائق
+
+function formatTime(seconds: number): string {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`
 }
 
-#stage{
-  width:100%;height:100%;
-  display:flex;justify-content:center;align-items:center;
-  position:relative;
-}
+export default function TimerPage() {
+  const [phase, setPhase] = useState<"idle" | "waiting" | "timer" | "done">("idle")
+  const [waitingTime, setWaitingTime] = useState(15)
+  const [timeLeft, setTimeLeft] = useState(TOTAL)
+  const [isPopActive, setIsPopActive] = useState(false)
+  const audioContextRef = useRef<AudioContext | null>(null)
 
-/* ══ START PHASE ══ */
-#ph-start{
-  position:absolute;
-  display:flex;flex-direction:column;
-  justify-content:center;align-items:center;
-  transition: opacity 0.4s ease;
-  z-index: 20;
-}
-#ph-start.out{opacity:0;pointer-events:none}
-
-.r-word{
-  font-family:'Cairo',sans-serif;font-weight:900;
-  font-size:clamp(100px,30vw,250px);
-  color: #f26735;
-  line-height:1;
-  -webkit-text-stroke: 12px #430929;
-  paint-order: stroke fill; 
-  text-shadow: 6px 6px 20px rgba(0,0,0,0.5); 
-}
-
-/* ══ TIMER PHASE ══ */
-#ph-timer{
-  position:absolute;inset:0;
-  display:flex;justify-content:center;align-items:center;
-  opacity:0;
-  pointer-events:none;
-  transform: translateX(-100vw); 
-  transition:
-    opacity 0.6s ease,
-    transform 0.9s cubic-bezier(0.16, 1, 0.3, 1);
-}
-#ph-timer.active{
-  opacity:1;
-  pointer-events:all;
-  transform: translateX(0); 
-}
-
-.bar-scene{ 
-  width:96vw; 
-  position:relative;
-  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); /* أنيماشن الـ Pop-up */
-}
-
-/* فئة الـ Pop-up التي تتفعل عند الضغط */
-.pop-active {
-  transform: scale(1.05);
-}
-
-.bar-outer{
-  width:100%;
-  height:clamp(150px, 35vh, 280px); 
-  background: rgba(0,0,0,0.5); 
-  border-radius:30px;
-  position:relative;
-  overflow:hidden;
-  border: 8px solid #430929; 
-  box-shadow: 0 15px 50px rgba(0,0,0,0.6);
-  cursor: pointer; /* تظهر علامة اليد عند المرور */
-}
-
-#bar-fill{
-  position:absolute;
-  top:0;right:0;
-  height:100%;
-  width:100%;
-  border-radius:20px;
-  background: #f26735; 
-  background: linear-gradient(to left, #d4562a 0%, #f26735 50%, #ff8c61 100%);
-  transform-origin:right center;
-  transition: width 1s linear;
-}
-
-#t-n{
-  position:absolute;inset:0;
-  display:flex;align-items:center;justify-content:center;
-  font-family:'Share Tech Mono',monospace;
-  font-size:clamp(100px, 20vh, 220px); 
-  color: #fff;
-  letter-spacing:10px;
-  z-index:10;
-  -webkit-text-stroke: 10px #430929;
-  paint-order: stroke fill;
-  text-shadow: 6px 6px 15px rgba(0,0,0,0.8);
-  pointer-events: none; /* عشان الضغطة تروح للـ bar-outer */
-}
-
-/* ══ DONE ══ */
-#ph-done{
-  position:absolute;opacity:0;pointer-events:none;
-  transition:opacity 0.7s;
-}
-#ph-done.active{opacity:1;}
-.dn-word{
-  font-family:'Cairo',sans-serif;
-  font-weight:900;
-  font-size:clamp(80px,20vw,180px);
-  color: #f26735;
-  -webkit-text-stroke: 12px #430929;
-  paint-order: stroke fill;
-  text-shadow: 6px 6px 15px rgba(0,0,0,0.5);
-}
-
-</style>
-</head>
-<body>
-
-<div id="stage">
-  <div id="ph-start">
-    <div id="display-text" class="r-word">جاهز</div>
-  </div>
-
-  <div id="ph-timer">
-    <div class="bar-scene" id="timer-container">
-      <div class="bar-outer">
-        <div id="bar-fill"></div>
-        <div id="t-n">5:00</div>
-      </div>
-    </div>
-  </div>
-
-  <div id="ph-done">
-    <div class="dn-word">انتهى الوقت</div>
-  </div>
-</div>
-
-<script>
-const TOTAL = 300; 
-const startPhase = document.getElementById('ph-start');
-const displayText = document.getElementById('display-text');
-const phTimer    = document.getElementById('ph-timer');
-const timerCont  = document.getElementById('timer-container');
-const phDone     = document.getElementById('ph-done');
-const tN         = document.getElementById('t-n');
-const barFill    = document.getElementById('bar-fill');
-
-let actx = null;
-function getCtx(){
-  if(!actx) actx = new (window.AudioContext||window.webkitAudioContext)();
-  return actx;
-}
-function tone(freq, dur, vol){
-  try {
-    const c = getCtx();
-    const o = c.createOscillator();
-    const g = c.createGain();
-    o.frequency.setValueAtTime(freq, c.currentTime);
-    g.gain.setValueAtTime(vol, c.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + dur);
-    o.connect(g); g.connect(c.destination);
-    o.start(); o.stop(c.currentTime + dur);
-  } catch(e){}
-}
-
-function fmt(s){ return `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`; }
-
-// إضافة أنيماشن الـ Pop عند الضغط
-timerCont.addEventListener('mousedown', () => {
-  timerCont.classList.add('pop-active');
-  tone(300, 0.1, 0.05); // صوت ضغطة خفيف
-});
-
-timerCont.addEventListener('mouseup', () => {
-  setTimeout(() => {
-    timerCont.classList.remove('pop-active');
-  }, 100);
-});
-
-window.onload = () => {
-  let count = 3;
-  setTimeout(() => {
-    const countdownInterval = setInterval(() => {
-      displayText.textContent = count;
-      tone(400, 0.1, 0.1); 
-      count--;
-      if (count < 0) {
-        clearInterval(countdownInterval);
-        startPhase.classList.add('out'); 
-        setTimeout(() => { launchTimer(); }, 5000); 
-      }
-    }, 1000);
-  }, 15000); 
-};
-
-function launchTimer() {
-  phTimer.classList.add('active');
-  startCountdown();
-}
-
-function startCountdown() {
-  let timeLeft = TOTAL;
-  const timerIv = setInterval(() => {
-    timeLeft--;
-    tN.textContent = fmt(timeLeft);
-    barFill.style.width = (timeLeft / TOTAL * 100) + '%';
-    if(timeLeft > 0) tone(600, 0.05, 0.01);
-    if(timeLeft <= 0) {
-      clearInterval(timerIv);
-      phTimer.classList.remove('active');
-      setTimeout(() => phDone.classList.add('active'), 600);
+  const getAudioContext = useCallback(() => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as typeof window & { webkitAudioContext: typeof AudioContext }).webkitAudioContext)()
     }
-  }, 1000);
+    return audioContextRef.current
+  }, [])
+
+  const playTone = useCallback((freq: number, dur: number, vol: number) => {
+    try {
+      const ctx = getAudioContext()
+      if (ctx.state === "suspended") ctx.resume()
+      const oscillator = ctx.createOscillator()
+      const gain = ctx.createGain()
+      oscillator.frequency.setValueAtTime(freq, ctx.currentTime)
+      gain.gain.setValueAtTime(vol, ctx.currentTime)
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + dur)
+      oscillator.connect(gain)
+      gain.connect(ctx.destination)
+      oscillator.start()
+      oscillator.stop(ctx.currentTime + dur)
+    } catch (e) {
+      console.error("[v0] Audio error:", e)
+    }
+  }, [getAudioContext])
+
+  // مرحلة الانتظار (15 ثانية شاشة فارغة)
+  useEffect(() => {
+    if (phase !== "waiting") return
+
+    if (waitingTime > 0) {
+      const timeout = setTimeout(() => {
+        setWaitingTime((prev) => prev - 1)
+      }, 1000)
+      return () => clearTimeout(timeout)
+    } else {
+      // انتهت فترة الانتظار، ابدأ المؤقت
+      setPhase("timer")
+    }
+  }, [phase, waitingTime])
+
+  // المؤقت الرئيسي
+  useEffect(() => {
+    if (phase !== "timer") return
+
+    if (timeLeft <= 0) {
+      playTone(800, 0.5, 0.3)
+      setTimeout(() => setPhase("done"), 600)
+      return
+    }
+
+    const interval = setInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          clearInterval(interval)
+          return 0
+        }
+        // صوت كل ثانية
+        playTone(500, 0.08, 0.08)
+        return prev - 1
+      })
+    }, 1000)
+
+    return () => clearInterval(interval)
+  }, [phase, timeLeft, playTone])
+
+  const handleStart = () => {
+    playTone(300, 0.1, 0.1)
+    setPhase("waiting")
+  }
+
+  const handleReset = () => {
+    playTone(250, 0.1, 0.1)
+    setPhase("idle")
+    setTimeLeft(TOTAL)
+    setWaitingTime(15)
+  }
+
+  const handleBarClick = () => {
+    setIsPopActive(true)
+    playTone(300, 0.1, 0.05)
+    setTimeout(() => setIsPopActive(false), 100)
+  }
+
+  return (
+    <div className="w-full h-screen flex justify-center items-center relative overflow-hidden bg-transparent">
+      {/* مرحلة الانتظار - زر البدء */}
+      {phase === "idle" && (
+        <div className="absolute flex flex-col justify-center items-center gap-8 animate-fade-in z-20">
+          <div className="ready-word">جاهز؟</div>
+          <button
+            onClick={handleStart}
+            className="start-button"
+          >
+            ابدأ
+          </button>
+        </div>
+      )}
+
+      {/* مرحلة الانتظار (شاشة فارغة 15 ثانية) */}
+      {phase === "waiting" && (
+        <div className="absolute flex flex-col justify-center items-center animate-fade-in z-20">
+        </div>
+      )}
+
+      {/* مرحلة المؤقت */}
+      {phase === "timer" && (
+        <div className="absolute inset-0 flex flex-col justify-center items-center gap-10 animate-slide-in">
+          <div 
+            className={`bar-scene ${isPopActive ? "pop-active" : ""}`}
+            onMouseDown={handleBarClick}
+            onMouseUp={() => setIsPopActive(false)}
+          >
+            <div className="bar-outer">
+              <div 
+                className="bar-fill"
+                style={{ width: `${(timeLeft / TOTAL) * 100}%` }}
+              />
+              <div className="timer-number">{formatTime(timeLeft)}</div>
+            </div>
+          </div>
+          <button
+            onClick={handleReset}
+            className="reset-button"
+          >
+            العودة للبداية
+          </button>
+        </div>
+      )}
+
+      {/* مرحلة الانتهاء */}
+      {phase === "done" && (
+        <div className="absolute inset-0 flex flex-col justify-center items-center gap-6 animate-fade-in">
+          <div 
+            className={`bar-scene ${isPopActive ? "pop-active" : ""}`}
+            onMouseDown={handleBarClick}
+            onMouseUp={() => setIsPopActive(false)}
+          >
+            <div className="bar-outer">
+              <div 
+                className="bar-fill"
+                style={{ width: "0%" }}
+              />
+              <div className="timer-number">{formatTime(0)}</div>
+            </div>
+          </div>
+          <div className="done-word">انتهى الوقت</div>
+          <button
+            onClick={handleReset}
+            className="start-button"
+          >
+            إعادة
+          </button>
+        </div>
+      )}
+    </div>
+  )
 }
-
-document.addEventListener('click', () => { if(actx) actx.resume(); }, {once: true});
-</script>
-
-</body>
-</html>
